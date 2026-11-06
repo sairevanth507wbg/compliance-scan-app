@@ -1,0 +1,8 @@
+# Runtime: Posit Connect image R 4.5.2 / Python 3.14.3 (Quarto 1.8.27)
+requests>=2.32.3
+psycopg[binary]>=3.2.10
+# Needed by Quarto to execute the Python cell when rendering on Connect
+jupyter>=1.1.1
+# Dashboard (app.py)
+shiny>=1.4.0
+pandas>=2.3.3

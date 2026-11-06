@@ -1,0 +1,27 @@
+# Secrets / local configuration - never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Posit publishing metadata (contains server URLs and deployment IDs)
+.posit/
+rsconnect/
+rsconnect-python/
+manifest.json
+
+# Generated output
+email_previews/
+compliance_job.html
+compliance_job_files/
+.quarto/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/

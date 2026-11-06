@@ -1,0 +1,22 @@
+---
+title: "Posit Connect Branch Compliance Job"
+format:
+  html:
+    embed-resources: true
+jupyter: python3
+---
+
+Scheduled job: checks that Git-backed content is deployed from the required
+branch of an approved GitHub organization. All settings come from
+this content item's **Vars** panel. A failed scan fails the render, so Connect
+shows it as an error.
+
+```{python}
+from dataclasses import asdict
+
+from compliance.job import compliance_job
+
+summary = compliance_job()
+for key, value in asdict(summary).items():
+    print(f"{key:22} {value}")
+```
