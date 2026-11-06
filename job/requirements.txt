@@ -1,0 +1,4 @@
+# Connect content item 1: scheduled compliance job (Quarto document)
+# Shared code is installed from the main branch of this repository.
+compliance-scan @ git+https://github.com/sairevanth507wbg/compliance-scan-app.git@main
+jupyter>=1.1.1

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "locale": "en_US.UTF-8",
+  "metadata": {
+    "appmode": "quarto-static",
+    "entrypoint": "compliance_job.qmd"
+  },
+  "quarto": {
+    "version": "1.8.27",
+    "engines": [
+      "jupyter"
+    ]
+  },
+  "python": {
+    "version": "3.14.3",
+    "package_manager": {
+      "name": "pip",
+      "version": "25.2",
+      "package_file": "requirements.txt"
+    }
+  },
+  "environment": {
+    "python": {
+      "requires": "==3.14.3"
+    }
+  },
+  "files": {
+    "requirements.txt": {
+      "checksum": "04423b80883a33ff7d8e855f09920986"
+    },
+    "compliance_job.qmd": {
+      "checksum": "b4da20c02b46a61255e6f1c0e9f7b4c4"
+    }
+  }
+}

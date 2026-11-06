@@ -1,0 +1,5 @@
+# Connect content item 2: admin dashboard (Shiny for Python)
+# Shared code is installed from the main branch of this repository.
+compliance-scan @ git+https://github.com/sairevanth507wbg/compliance-scan-app.git@main
+shiny>=1.4.0
+pandas>=2.3.3

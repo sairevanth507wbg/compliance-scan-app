@@ -5,11 +5,12 @@
 *.pem
 *.key
 
-# Posit publishing metadata (contains server URLs and deployment IDs)
+# Posit publishing metadata (contains server URLs and deployment IDs).
+# job/manifest.json and dashboard/manifest.json ARE committed: Git-backed
+# deployment needs them, and they contain no server details.
 .posit/
 rsconnect/
 rsconnect-python/
-manifest.json
 
 # Generated output
 email_previews/
