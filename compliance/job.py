@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from typing import Callable
 
+from .app_settings import merge_into_env
 from .config import Settings
 from .connect_client import ConnectAPIError, ConnectAuthError, ConnectClient, ConnectNotFoundError
 from .models import (
@@ -455,25 +457,34 @@ def open_store(settings: Settings) -> ViolationStore:
 def compliance_job(settings: Settings | None = None) -> RunSummary:
     """Entry point used by the CLI and the scheduled Quarto document."""
     configure_logging()
+    from_dashboard = settings is None
     settings = settings or Settings.from_env()
 
     if not settings.scan_enabled:
-        log.info("COMPLIANCE_SCAN_ENABLED is not true; scan skipped.")
+        log.info("COMPLIANCE_SCAN_ENABLED=false (emergency stop); scan skipped.")
         return RunSummary(skipped_reason="scan disabled")
 
-    settings.validate()
-    if settings.grace_period_problem:
-        log.error("Grace period ignored: %s. No application will be locked.", settings.grace_period_problem)
-    if settings.dry_run:
-        log.warning("DRY RUN (no DATABASE_URL or DRY_RUN=true): detect and log only; no emails, no locking.")
-    if settings.blocking_enabled and not settings.blocking_effective:
-        log.warning("BLOCKING_ENABLED=true but blocking is inactive (dry run or no valid grace period).")
-    log.info("Starting branch compliance scan: %s", settings.describe())
-
-    client = ConnectClient(settings.connect_server, settings.connect_api_key,
-                           timeout=settings.request_timeout_seconds, verify_ssl=settings.verify_ssl)
-    store = open_store(settings)
+    store = open_store(settings)   # creates the tables on first run
     try:
+        if from_dashboard and not settings.dry_run:
+            # Settings saved in the dashboard (Settings tab) override the environment.
+            stored = store.load_settings()
+            settings = Settings.from_env(merge_into_env(os.environ, stored))
+            log.info("Loaded %d setting(s) from the dashboard.", len(stored))
+
+        settings.validate()
+        if settings.grace_period_problem:
+            log.error("Grace period ignored: %s. No application will be locked.", settings.grace_period_problem)
+        if settings.dry_run:
+            log.warning("DRY RUN (no DATABASE_URL or DRY_RUN=true): detect and log only; no emails, no locking.")
+        if settings.blocking_enabled and not settings.blocking_effective:
+            log.warning("Locking is turned on but inactive (dry run or no valid grace period).")
+        if not settings.email_effective and settings.email_enabled and not settings.dry_run:
+            log.warning("Emails are on but the email server is not configured (Settings tab); no emails will be sent.")
+        log.info("Starting branch compliance scan: %s", settings.describe())
+
+        client = ConnectClient(settings.connect_server, settings.connect_api_key,
+                               timeout=settings.request_timeout_seconds, verify_ssl=settings.verify_ssl)
         if not store.try_acquire_run_lock():
             log.warning("Another compliance run is in progress; this run exits without changes.")
             return RunSummary(dry_run=settings.dry_run, skipped_reason="another run in progress")

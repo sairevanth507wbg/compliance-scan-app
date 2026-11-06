@@ -127,7 +127,8 @@ def test_grace_period_invalid_values_disable_locking(value, unit):
 
 def test_safe_defaults():
     s = Settings.from_env({})
-    assert s.scan_enabled is False
+    assert s.scan_enabled is True            # on/off is the Connect schedule
+    assert s.email_effective is False        # no email server configured yet
     assert s.blocking_enabled is False
     assert s.required_branch == "main"
     assert s.allowed_git_orgs == ()          # no built-in organizations: must come from Vars
@@ -160,12 +161,11 @@ def test_dedicated_key_preferred():
     assert s.connect_api_key == "admin"
 
 
-def test_instance_required_with_database():
+def test_instance_label_optional():
     base = {"CONNECT_SERVER": "https://connect.example.com", "CONNECT_API_KEY": "k", "ALLOWED_GIT_ORGS": "example-org"}
     Settings.from_env(base).validate()                                   # dry run: optional
     assert Settings.from_env(base).instance_label == "connect.example.com"
-    with pytest.raises(ConfigError, match="COMPLIANCE_INSTANCE"):
-        Settings.from_env({**base, "DATABASE_URL": "postgresql://x"}).validate()
+    Settings.from_env({**base, "DATABASE_URL": "postgresql://x"}).validate()   # optional: host name is used
     s = Settings.from_env({**base, "DATABASE_URL": "postgresql://x", "COMPLIANCE_INSTANCE": " Prod-Internal "})
     s.validate()
     assert s.instance == "prod-internal"

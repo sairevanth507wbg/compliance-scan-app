@@ -211,6 +211,10 @@ class DemoDB:
             CREATE TABLE scan_scope (
                 instance TEXT, content_guid TEXT, list_type TEXT, reason TEXT, added_by TEXT, added_at TEXT,
                 PRIMARY KEY (instance, content_guid, list_type));
+            DROP TABLE IF EXISTS app_settings;
+            CREATE TABLE app_settings (
+                instance TEXT, key TEXT, value TEXT, updated_by TEXT, updated_at TEXT,
+                PRIMARY KEY (instance, key));
             CREATE TABLE admin_actions (
                 id INTEGER PRIMARY KEY, instance TEXT, actor TEXT, action TEXT, content_guid TEXT, app_name TEXT,
                 details TEXT, success INTEGER, error_message TEXT, occurred_at TEXT);
@@ -246,6 +250,13 @@ class DemoDB:
                         detail={"COMPLIANT": "branch=main", "UNKNOWN": "Connect did not report a branch",
                                 "NOT_GIT_BACKED": "not deployed from Git"}[status],
                         last_checked_at=now))
+
+        # Sample settings as an admin would have saved them in the Settings tab.
+        for key, value in {"ALLOWED_GIT_ORGS": ",".join(DEMO_ORGS), "ORG_DISPLAY_NAME": "Example Org",
+                           "ADMIN_EMAILS": "posit-admins@example.com", "SMTP_HOST": "smtp.example.com",
+                           "SMTP_SENDER": "noreply@example.com", "SMTP_SENDER_NAME": "Posit Connect"}.items():
+            self._insert("app_settings", dict(instance=DEMO_INSTANCE, key=key, value=value, updated_by="posit-admin",
+                                              updated_at=now - timedelta(days=3)))
 
         # One app excluded by an admin on prod-internal, with its audit record.
         excluded_guid = demo_guid(101)
@@ -402,6 +413,19 @@ class DemoDB:
         for r in rows:
             r["success"] = bool(r["success"])
         return list(ACTION_COLUMNS), [tuple(r[c] for c in ACTION_COLUMNS) for r in rows]
+
+    def load_settings(self, instance: str) -> dict[str, str]:
+        cur = self._conn.execute("SELECT key, value FROM app_settings WHERE instance = ?", (instance,))
+        return dict(cur.fetchall())
+
+    def save_settings(self, instance: str, changes: dict[str, str], actor: str) -> None:
+        for key, value in changes.items():
+            if value == "":
+                self._conn.execute("DELETE FROM app_settings WHERE instance = ? AND key = ?", (instance, key))
+            else:
+                self._conn.execute("INSERT OR REPLACE INTO app_settings VALUES (?, ?, ?, ?, ?)",
+                                   (instance, key, value, actor, _iso(datetime.now(timezone.utc))))
+        self._conn.commit()
 
     def demo_connect(self) -> "DemoConnect":
         return DemoConnect(self)

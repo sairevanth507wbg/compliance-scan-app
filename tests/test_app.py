@@ -27,7 +27,7 @@ def get(monkeypatch, headers=None, settings=DashboardSettings(), db=FakeDB(), pr
 def test_dashboard_renders_for_admin(monkeypatch):
     resp = get(monkeypatch, ADMIN)
     assert resp.status_code == 200
-    for text in ("Violations", "All apps", "Scan runs", "Admin", "Lock application", "Exclude from scan",
+    for text in ("Violations", "All apps", "Scan runs", "Admin", "Settings", "Lock application", "Exclude from scan",
                  "SQL query",
                  "Signed in as admin1", "sql_text", "Open violations", "Git apps compliant"):
         assert text in resp.text

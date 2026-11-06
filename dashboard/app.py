@@ -27,6 +27,7 @@ from shiny import App, reactive, render, ui
 from compliance.admin import (
     DEFAULT_MANUAL_LOCK_MESSAGE, GUID_RE, change_scope_list, describe_app, set_app_lock,
 )
+from compliance.app_settings import BOOL_TRUE, GROUP_ENFORCEMENT, GROUPS, SPECS, effective_values, validate_settings
 from compliance.config import ConfigError
 from compliance.connect_client import ConnectAPIError, ConnectClient, ConnectNotFoundError
 from compliance.job import configure_logging
@@ -332,6 +333,27 @@ def admin_panel():
     )
 
 
+def settings_panel():
+    return ui.nav_panel("Settings", ui.output_ui("settings_form"))
+
+
+def settings_input(spec, value: str):
+    """One form control for a setting, pre-filled with the value the job currently uses."""
+    input_id = f"set_{spec.key}"
+    help_text = ui.div(spec.help, class_="form-text mt-0 mb-2") if spec.help else None
+    if spec.kind == "bool":
+        control = ui.input_switch(input_id, spec.label, value=(value == BOOL_TRUE))
+    elif spec.kind == "choice":
+        control = ui.input_select(input_id, spec.label, {c: c for c in spec.choices},
+                                  selected=value or spec.default, width="100%")
+    elif spec.kind == "textarea":
+        control = ui.input_text_area(input_id, spec.label, value=value, rows=4, width="100%")
+    else:
+        control = ui.input_text(input_id, spec.label, value=value, width="100%",
+                                placeholder=f"default: {spec.default}" if spec.default else "")
+    return ui.div(control, help_text)
+
+
 def sql_panel():
     schema = SETTINGS.db_schema
     return ui.nav_panel(
@@ -373,6 +395,7 @@ def app_ui(request):
         violations_panel(),
         apps_panel(),
         admin_panel(),
+        settings_panel(),
         runs_panel(),
         sql_panel(),
         title=APP_TITLE,
@@ -419,6 +442,7 @@ body { background-color: #f8fafc; color: #1f2937; }
 
 #sql_text { font-family: ui-monospace, Consolas, monospace; font-size: .9rem; }
 .timeline-item { border-left: 2px solid #cbd5e1; padding-left: .6rem; margin-bottom: .5rem; }
+.settings-primary { border-left: 3px solid #1d4ed8; }
 """
 
 
@@ -725,13 +749,126 @@ def server(input, output, session):
     scope_msg = reactive.value(("", ""))
 
     def action_instance() -> str | None:
-        """Instance label for admin actions: the one this dashboard's database belongs to
-        (each Connect instance has its own database). None until the job has run once."""
+        """Instance label for admin actions and settings: derived from this Connect server's
+        address (the same label the job uses), else the one instance found in the database."""
+        if SETTINGS.instance:
+            return SETTINGS.instance
         try:
             instances = DB.list_instances()
         except QueryFailed:
             return None
         return instances[0] if instances else None
+
+    # --- settings tab -------------------------------------------------------------
+
+    settings_version = reactive.value(0)
+    settings_msg = reactive.value(("", ""))
+    pending_settings = reactive.value(None)
+
+    @render.ui
+    def settings_form():
+        settings_version()
+        instance = action_instance()
+        if not instance:
+            return ui.card(ui.p("Settings become available after the compliance job has run once "
+                                "(it creates the database tables).", class_="text-muted mb-0"))
+        try:
+            stored = DB.load_settings(instance)
+        except QueryFailed as exc:
+            return ui.div(str(exc), class_="alert alert-danger")
+        values = effective_values(stored, os.environ)
+
+        cards = []
+        for group in GROUPS:
+            specs = [s for s in SPECS if s.group == group]
+            inputs = [settings_input(s, values[s.key]) for s in specs]
+            body = ui.layout_columns(*inputs, col_widths=(6, 6)) if group != GROUP_ENFORCEMENT \
+                else ui.layout_columns(*inputs, col_widths=(12, 4, 4, 4, 12))
+            cards.append(ui.card(ui.card_header(group), body,
+                                 class_="settings-primary" if group == GROUP_ENFORCEMENT else None))
+
+        vars_card = ui.card(
+            ui.card_header("Kept in Connect Vars (not editable here)"),
+            ui.tags.table(
+                ui.tags.tr(ui.tags.th("Database connection", class_="pe-4"),
+                           ui.tags.td("configured" if DB is not None else "missing")),
+                ui.tags.tr(ui.tags.th("Admin API key", class_="pe-4"),
+                           ui.tags.td("configured" if CONNECT is not None else "missing - lock/unlock disabled")),
+                class_="table table-sm mb-2"),
+            ui.p("The job item has its own Vars: DATABASE_URL and COMPLIANCE_CONNECT_API_KEY. "
+                 "The Connect address is provided automatically.", class_="text-muted small mb-0"),
+        )
+        return ui.div(
+            ui.p(f"Settings for {instance}. Saved settings apply from the job's next run; every change is "
+                 "recorded under Admin > Recent admin actions.", class_="text-muted"),
+            *cards,
+            ui.div(ui.input_action_button("settings_save", "Save settings", class_="btn-primary"),
+                   class_="mb-2"),
+            ui.output_ui("settings_result"),
+            vars_card,
+        )
+
+    def apply_settings(instance: str, changes: dict) -> None:
+        try:
+            DB.save_settings(instance, changes, username)
+            DB.record_admin_action(instance=instance, actor=username, action="SETTINGS_UPDATE", content_guid=None,
+                                   app_name=None, details={"changed": changes}, success=True)
+        except QueryFailed as exc:
+            settings_msg.set(("danger", f"Not saved: {exc}"))
+            return
+        settings_msg.set(("success", f"Saved {len(changes)} setting(s). The job uses them from its next run."))
+        settings_version.set(settings_version.get() + 1)
+        admin_version.set(admin_version.get() + 1)
+
+    @reactive.effect
+    @reactive.event(input.settings_save)
+    def _save_settings():
+        instance = action_instance()
+        if not instance or not username:
+            settings_msg.set(("danger", "Not saved: your user or this instance could not be identified."))
+            return
+        raw = {s.key: input[f"set_{s.key}"]() for s in SPECS}
+        normalized, errors = validate_settings(raw)
+        if errors:
+            settings_msg.set(("danger", "Not saved: " + "; ".join(errors.values())))
+            return
+        try:
+            current = effective_values(DB.load_settings(instance), os.environ)
+        except QueryFailed as exc:
+            settings_msg.set(("danger", f"Not saved: {exc}"))
+            return
+        changes = {k: v for k, v in normalized.items() if v != current.get(k, "")}
+        if not changes:
+            settings_msg.set(("secondary", "No changes to save."))
+            return
+        if changes.get("BLOCKING_ENABLED") == BOOL_TRUE:
+            pending_settings.set((instance, changes))
+            ui.modal_show(ui.modal(
+                ui.p(f"Locking will be turned on with a grace period of {normalized.get('GRACE_PERIOD_VALUE')} "
+                     f"{normalized.get('GRACE_PERIOD_UNIT', 'days')}. Apps that stay non-compliant after the "
+                     "grace period (and 24 hours after their final warning) will be locked automatically."),
+                title="Turn on automatic locking?",
+                footer=ui.TagList(ui.modal_button("Cancel"),
+                                  ui.input_action_button("settings_confirm", "Turn on and save",
+                                                         class_="btn-danger")),
+                easy_close=True))
+            return
+        apply_settings(instance, changes)
+
+    @reactive.effect
+    @reactive.event(input.settings_confirm)
+    def _confirm_settings():
+        pending = pending_settings.get()
+        if not pending:
+            return
+        pending_settings.set(None)
+        ui.modal_remove()
+        apply_settings(*pending)
+
+    @render.ui
+    def settings_result():
+        kind, text = settings_msg.get()
+        return ui.div(text, class_=f"alert alert-{kind} mt-2") if text else None
 
     def ask_lock_confirmation(lock: bool, guid: str | None = None) -> None:
         """Show the confirmation dialog. guid comes from a selected row, or the Admin tab's text box."""

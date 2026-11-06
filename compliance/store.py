@@ -34,6 +34,7 @@ RUNS_TABLE = "scan_runs"
 CONTENT_TABLE = "content_compliance"
 SCOPE_TABLE = "scan_scope"
 ACTIONS_TABLE = "admin_actions"
+SETTINGS_TABLE = "app_settings"
 
 # branch_violations columns except id, in a fixed order.
 FIELDS = (
@@ -176,6 +177,16 @@ CREATE TABLE IF NOT EXISTS {actions} (
     error_message  TEXT,
     occurred_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Settings edited in the dashboard (Settings tab); key = environment variable name.
+CREATE TABLE IF NOT EXISTS {settings} (
+    instance    TEXT        NOT NULL,
+    key         TEXT        NOT NULL,
+    value       TEXT        NOT NULL,
+    updated_by  TEXT        NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (instance, key)
+);
+
 CREATE INDEX IF NOT EXISTS admin_actions_instance_time ON {actions} (instance, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS admin_actions_content ON {actions} (instance, content_guid);
 """
@@ -194,6 +205,7 @@ class ViolationStore(Protocol):
                               status: str, detail: str | None, checked_at: datetime) -> None: ...
     def prune_content_status(self, seen_guids: set[str]) -> int: ...
     def load_scope(self) -> ScanScope: ...
+    def load_settings(self) -> dict[str, str]: ...
     def start_run(self, connect_server: str, settings_summary: str, started_at: datetime) -> int: ...
     def finish_run(self, status: str, finished_at: datetime, summary: Any, error: str | None = None) -> None: ...
     def try_acquire_run_lock(self) -> bool: ...
@@ -217,6 +229,10 @@ class InMemoryStore:
         self.runs: list[dict] = []
         self.run_id: int | None = None
         self.scope: set[tuple[str, str]] = set()   # (content_guid, list_type)
+        self.settings: dict[str, str] = {}
+
+    def load_settings(self) -> dict[str, str]:
+        return dict(self.settings)
 
     def load_scope(self) -> ScanScope:
         return ScanScope(
@@ -298,7 +314,7 @@ class PostgresStore:
         self._jsonb = Jsonb
         self._t = {name: sql.Identifier(schema, name)
                    for name in (TABLE, NOTES_TABLE, EVENTS_TABLE, RUNS_TABLE, CONTENT_TABLE,
-                                SCOPE_TABLE, ACTIONS_TABLE)}
+                                SCOPE_TABLE, ACTIONS_TABLE, SETTINGS_TABLE)}
         self._lock_key = f"posit_branch_compliance:{schema}:{instance}"
         self.run_id: int | None = None
         extra = {} if "sslmode=" in database_url else {"sslmode": "require"}  # Azure requires TLS
@@ -313,7 +329,7 @@ class PostgresStore:
         statement = sql.SQL(DDL).format(
             schema=sql.Identifier(schema), table=self._t[TABLE], notes=self._t[NOTES_TABLE],
             events=self._t[EVENTS_TABLE], runs=self._t[RUNS_TABLE], content=self._t[CONTENT_TABLE],
-            scope=self._t[SCOPE_TABLE], actions=self._t[ACTIONS_TABLE])
+            scope=self._t[SCOPE_TABLE], actions=self._t[ACTIONS_TABLE], settings=self._t[SETTINGS_TABLE])
         with self._conn.cursor() as cur:
             cur.execute(statement)
 
@@ -382,7 +398,11 @@ class PostgresStore:
                           ).format(t=self._t[CONTENT_TABLE])
         return self._execute(q, (self.instance, list(seen_guids))).rowcount
 
-    # ----- admin-maintained scan scope ----------------------------------------------
+    # ----- admin-maintained settings and scan scope -----------------------------------
+
+    def load_settings(self) -> dict[str, str]:
+        q = self._sql.SQL("SELECT key, value FROM {t} WHERE instance = %s").format(t=self._t[SETTINGS_TABLE])
+        return {r["key"]: r["value"] for r in self._execute(q, (self.instance,)).fetchall()}
 
     def load_scope(self) -> ScanScope:
         q = self._sql.SQL("SELECT content_guid, list_type FROM {t} WHERE instance = %s").format(t=self._t[SCOPE_TABLE])

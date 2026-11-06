@@ -23,7 +23,9 @@ from typing import Any, Iterator, Mapping
 
 from .config import ConfigError, _float, _int, _list
 from .models import STATUS_OPEN, STATUS_RESOLVED
-from .store import ACTIONS_TABLE, CONTENT_TABLE, EVENTS_TABLE, NOTES_TABLE, RUNS_TABLE, SCOPE_TABLE, TABLE
+from .store import (
+    ACTIONS_TABLE, CONTENT_TABLE, EVENTS_TABLE, NOTES_TABLE, RUNS_TABLE, SCOPE_TABLE, SETTINGS_TABLE, TABLE,
+)
 
 log = logging.getLogger("branch_compliance.dashboard")
 
@@ -162,6 +164,15 @@ class DashboardSettings:
     # For lock/unlock from the Admin tab (same administrator key as the job).
     connect_server: str = ""
     connect_api_key: str = ""
+
+    @property
+    def instance(self) -> str:
+        """Same label the job uses: COMPLIANCE_INSTANCE, else the host name of CONNECT_SERVER."""
+        explicit = (os.environ.get("COMPLIANCE_INSTANCE") or "").strip().lower()
+        if explicit:
+            return explicit
+        host = re.sub(r"^https?://", "", self.connect_server).split("/")[0].split(":")[0]
+        return host.lower()
 
     def __repr__(self) -> str:  # never print the connection string or key
         return (f"DashboardSettings(schema={self.db_schema!r}, database_configured={bool(self.database_url)}, "
@@ -578,6 +589,31 @@ class DashboardDB:
         with self._transaction(read_only=False) as cur:
             cur.execute(q, (instance, actor, action, content_guid, app_name, Jsonb(details or {}), success,
                             error_message))
+
+    def load_settings(self, instance: str) -> dict[str, str]:
+        from psycopg import sql
+
+        q = sql.SQL("SELECT key, value FROM {t} WHERE instance = %s").format(t=self._t(SETTINGS_TABLE))
+        with self._transaction(read_only=True) as cur:
+            cur.execute(q, (instance,))
+            return {k: v for k, v in cur.fetchall()}
+
+    def save_settings(self, instance: str, changes: dict[str, str], actor: str) -> None:
+        """Upsert changed settings; an empty value deletes the row (= use the default)."""
+        from psycopg import sql
+
+        t = self._t(SETTINGS_TABLE)
+        upsert = sql.SQL("INSERT INTO {t} (instance, key, value, updated_by, updated_at) "
+                         "VALUES (%s, %s, %s, %s, now()) ON CONFLICT (instance, key) DO UPDATE SET "
+                         "value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, "
+                         "updated_at = EXCLUDED.updated_at").format(t=t)
+        delete = sql.SQL("DELETE FROM {t} WHERE instance = %s AND key = %s").format(t=t)
+        with self._transaction(read_only=False) as cur:
+            for key, value in changes.items():
+                if value == "":
+                    cur.execute(delete, (instance, key))
+                else:
+                    cur.execute(upsert, (instance, key, value, actor))
 
     def list_admin_actions(self, instance: str = "", limit: int = 200) -> tuple[list[str], list[tuple]]:
         from psycopg import sql

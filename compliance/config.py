@@ -107,12 +107,12 @@ DEFAULT_LOCK_MESSAGE = (
 
 @dataclass(frozen=True)
 class Settings:
-    # Master switch: nothing happens unless an admin turns this on.
-    scan_enabled: bool = False
+    # Runs whenever Connect runs the job; use the Connect schedule to turn it
+    # on/off. COMPLIANCE_SCAN_ENABLED=false is still honoured as an emergency stop.
+    scan_enabled: bool = True
 
-    # Which Connect instance this job scans, e.g. prod-internal, qa-external,
-    # dev-internal. Stored on every row and shown in emails; also keeps rows apart
-    # if several instances ever share a database.
+    # Label of the Connect instance; defaults to the host name of CONNECT_SERVER
+    # (set automatically by Connect). Stored on every row and shown in emails.
     instance: str = ""
 
     connect_server: str = ""
@@ -164,7 +164,7 @@ class Settings:
         if relock_hours < 0:
             raise ConfigError("RELOCK_WINDOW_HOURS cannot be negative")
         return cls(
-            scan_enabled=_bool(env, "COMPLIANCE_SCAN_ENABLED", False),
+            scan_enabled=_bool(env, "COMPLIANCE_SCAN_ENABLED", True),
             instance=(env.get("COMPLIANCE_INSTANCE") or "").strip().lower(),
             connect_server=(env.get("CONNECT_SERVER") or "").strip(),
             # A dedicated admin key can be stored as COMPLIANCE_CONNECT_API_KEY
@@ -241,15 +241,13 @@ class Settings:
         if not self.required_branch:
             problems.append("REQUIRED_BRANCH is empty")
         if not self.allowed_git_orgs:
-            problems.append("ALLOWED_GIT_ORGS is not set (comma-separated GitHub organizations)")
+            problems.append("Allowed GitHub organizations are not set - fill them in on the dashboard's "
+                            "Settings tab (ALLOWED_GIT_ORGS)")
         if not _SCHEMA_RE.match(self.db_schema):
             problems.append("DB_SCHEMA must be a simple identifier (letters, digits, underscore)")
         if self.instance and not _INSTANCE_RE.match(self.instance):
             problems.append("COMPLIANCE_INSTANCE must be lowercase letters, digits, '-' or '_' "
                             "(max 50), e.g. prod-internal")
-        if not self.instance and not self.dry_run:
-            problems.append("COMPLIANCE_INSTANCE is not set (e.g. prod-internal, qa-external); it is required "
-                            "when DATABASE_URL is set (it labels every row and email)")
         if problems:
             raise ConfigError("; ".join(problems))
 
