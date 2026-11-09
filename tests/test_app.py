@@ -33,6 +33,21 @@ def test_dashboard_renders_for_admin(monkeypatch):
         assert text in resp.text
 
 
+def test_user_from_shiny_server_credentials_header(monkeypatch):
+    headers = {"Shiny-Server-Credentials": json.dumps({"user": "admin2", "groups": ["posit-admins"]})}
+    resp = get(monkeypatch, headers)
+    assert "Signed in as admin2" in resp.text
+
+
+def test_current_user_falls_back_to_session_user():
+    class Session:
+        user = "admin3"
+        groups = ["posit-admins"]
+
+    user, name = dashboard._current_user({}, Session())
+    assert name == "admin3" and user.groups == ("posit-admins",)
+
+
 def test_no_instance_dropdown(monkeypatch):
     resp = get(monkeypatch, ADMIN)
     assert 'id="instance"' not in resp.text and "All instances" not in resp.text

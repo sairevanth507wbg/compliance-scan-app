@@ -33,7 +33,7 @@ from compliance.connect_client import ConnectAPIError, ConnectClient, ConnectNot
 from compliance.job import configure_logging
 from compliance.models import SCOPE_ENFORCE_ONLY, SCOPE_EXCLUDED
 from compliance.queries import (
-    EXAMPLE_QUERIES, ContentFilters, DashboardDB, DashboardSettings, NoteRejected, QueryFailed,
+    EXAMPLE_QUERIES, ConnectUser, ContentFilters, DashboardDB, DashboardSettings, NoteRejected, QueryFailed,
     QueryRejected, QueryResult, ViolationFilters, is_authorized, parse_connect_user,
 )
 
@@ -41,6 +41,7 @@ configure_logging()
 log = logging.getLogger("branch_compliance.dashboard")
 
 CREDENTIALS_HEADER = "RStudio-Connect-Credentials"
+CREDENTIALS_HEADERS = (CREDENTIALS_HEADER, "Shiny-Server-Credentials")
 APP_TITLE = "Branch Compliance"
 DEMO = os.environ.get("DASHBOARD_DEMO", "").strip().lower() in ("1", "true", "yes", "on")
 EXAMPLES = EXAMPLE_QUERIES
@@ -85,8 +86,17 @@ except ConfigError as exc:
 # ----- helpers ------------------------------------------------------------------
 
 
-def _current_user(headers):
-    user = parse_connect_user(headers.get(CREDENTIALS_HEADER))
+def _current_user(headers, session=None):
+    """The signed-in Connect viewer. Connect passes it as JSON in a request header;
+    depending on the Connect version the header is RStudio-Connect-Credentials or
+    Shiny-Server-Credentials. Shiny for Python also exposes it as session.user."""
+    user = None
+    for header in CREDENTIALS_HEADERS:
+        user = parse_connect_user(headers.get(header))
+        if user:
+            break
+    if user is None and session is not None and getattr(session, "user", None):
+        user = ConnectUser(str(session.user), tuple(str(g) for g in (getattr(session, "groups", None) or ()) if g))
     name = user.username if user else SETTINGS.local_user
     return user, name
 
@@ -450,7 +460,10 @@ body { background-color: #f8fafc; color: #1f2937; }
 
 
 def server(input, output, session):
-    user, username = _current_user(session.http_conn.headers)
+    user, username = _current_user(session.http_conn.headers, session)
+    if not username:
+        log.warning("Session has no Connect user; header names present: %s",
+                    sorted(h for h in session.http_conn.headers.keys() if "credential" in h.lower()))
     # Defense in depth: never serve data to a session the UI would have refused.
     if DB is None or not is_authorized(user, SETTINGS):
         return
@@ -782,8 +795,12 @@ def server(input, output, session):
         for group in GROUPS:
             specs = [s for s in SPECS if s.group == group]
             inputs = [settings_input(s, values[s.key]) for s in specs]
-            body = ui.layout_columns(*inputs, col_widths=(6, 6)) if group != GROUP_ENFORCEMENT \
-                else ui.layout_columns(*inputs, col_widths=(12, 4, 4, 4, 12))
+            if group == GROUP_ENFORCEMENT:
+                body = ui.layout_columns(*inputs, col_widths=(12, 4, 4, 4, 12))
+            elif len(inputs) == 1:
+                body = inputs[0]
+            else:
+                body = ui.layout_columns(*inputs, col_widths=(6, 6))
             cards.append(ui.card(ui.card_header(group), body,
                                  class_="settings-primary" if group == GROUP_ENFORCEMENT else None))
 
@@ -824,8 +841,12 @@ def server(input, output, session):
     @reactive.event(input.settings_save)
     def _save_settings():
         instance = action_instance()
-        if not instance or not username:
-            settings_msg.set(("danger", "Not saved: your user or this instance could not be identified."))
+        if not username:
+            settings_msg.set(("danger", "Not saved: Connect did not pass your user name to this app. "
+                                        "Make sure Access is set to specific users or groups and reload the page."))
+            return
+        if not instance:
+            settings_msg.set(("danger", "Not saved: this Connect instance could not be identified."))
             return
         raw = {s.key: input[f"set_{s.key}"]() for s in SPECS}
         normalized, errors = validate_settings(raw)
