@@ -138,7 +138,7 @@ def _parts(kind: NoticeKind, v: Violation, settings: Settings, due: datetime | N
     steps = [
         f"Merge your changes into the '{v.required_branch}' branch of a repository under {orgs}.",
         f"Redeploy the application to Posit Connect from that repository and the '{v.required_branch}' branch.",
-        f"The compliance check runs about every {settings.scan_interval_minutes} minutes and closes this issue "
+        "The compliance check runs automatically and closes this issue "
         "automatically once the application is compliant.",
     ]
     return _Parts(subject, headline, intro, callout_title, callout, reasons, steps)

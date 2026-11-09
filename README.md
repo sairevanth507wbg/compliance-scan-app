@@ -9,7 +9,7 @@ It has two parts:
 
 | Part | File | Runs as |
 |---|---|---|
-| **Compliance job** | `compliance_job.qmd` (or `run_compliance.py`) | A scheduled Quarto document on Connect, e.g. every 15 minutes |
+| **Compliance job** | `compliance_job.qmd` (or `run_compliance.py`) | A scheduled Quarto document on Connect; the admin sets how often on its Schedule tab |
 | **Dashboard** | `app.py` | A Shiny for Python app on Connect, restricted to admins |
 
 - **One database per instance:** each Connect instance (for example Dev, QA and Prod, internal and external) has its own job, its own dashboard and its own PostgreSQL database. Rows are also tagged with `COMPLIANCE_INSTANCE`, which labels the data and the emails.
@@ -90,7 +90,6 @@ Set these in **Vars** on each Connect content item. See `.env.example` for the f
 | `SMTP_STARTTLS`, `SMTP_USERNAME`, `SMTP_PASSWORD` | no | `false`, –, – | |
 | `ADMIN_EMAILS` | recommended | – | Comma-separated. Admins receive the final warning, locked and fix-window emails. |
 | `LOCK_MESSAGE` | no | built-in | Markdown shown to visitors of a locked app |
-| `SCAN_INTERVAL_MINUTES` | no | `15` | Only used in email text. The real schedule is set in Connect. |
 
 ### Dashboard (`app.py`)
 
@@ -169,7 +168,7 @@ Exit codes for `run_compliance.py`: `0` OK, `1` configuration error, `2` Connect
 
 1. Publish this folder as a **Quarto document** with `compliance_job.qmd` as the primary file. Use a Python 3.11+ execution environment that includes Quarto.
 2. Enter the variables under **Vars**.
-3. Under **Schedule**, run it every 15 minutes, with "send email after update" off.
+3. Under **Schedule**, choose how often it runs (the admin decides; nothing in the code assumes an interval), with "send email after update" off.
 4. Under **Access**, restrict viewing to admins.
 
 Repeat on each Connect instance, with its own `COMPLIANCE_INSTANCE` and API key.

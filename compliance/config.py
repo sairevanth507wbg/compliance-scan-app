@@ -107,8 +107,8 @@ DEFAULT_LOCK_MESSAGE = (
 
 @dataclass(frozen=True)
 class Settings:
-    # Runs whenever Connect runs the job; use the Connect schedule to turn it
-    # on/off. COMPLIANCE_SCAN_ENABLED=false is still honoured as an emergency stop.
+    # Runs whenever Connect runs the job. How often is decided by the admin on the
+    # job's Schedule tab in Connect. COMPLIANCE_SCAN_ENABLED=false is an emergency stop.
     scan_enabled: bool = True
 
     # Label of the Connect instance; defaults to the host name of CONNECT_SERVER
@@ -126,9 +126,6 @@ class Settings:
     allowed_git_orgs: tuple[str, ...] = ()
     # Optional organization name used in email/lock-message wording.
     org_display_name: str = ""
-
-    # Informational: the real schedule is set in Posit Connect.
-    scan_interval_minutes: int = 15
 
     grace_period: timedelta | None = None
     grace_period_problem: str | None = None
@@ -176,7 +173,6 @@ class Settings:
             allowed_git_host=(env.get("ALLOWED_GIT_HOST") or "github.com").strip().lower(),
             allowed_git_orgs=tuple(o.lower() for o in _list(env, "ALLOWED_GIT_ORGS")),
             org_display_name=(env.get("ORG_DISPLAY_NAME") or "").strip(),
-            scan_interval_minutes=_int(env, "SCAN_INTERVAL_MINUTES", 15),
             grace_period=grace,
             grace_period_problem=problem,
             relock_window=timedelta(hours=relock_hours),

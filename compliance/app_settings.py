@@ -69,12 +69,7 @@ SPECS: tuple[SettingSpec, ...] = (
     SettingSpec("SMTP_STARTTLS", "Use STARTTLS", GROUP_SMTP, "bool", "false"),
     SettingSpec("SMTP_SENDER", "Sender address", GROUP_SMTP, "emails", "", "e.g. the no-reply address Connect uses."),
     SettingSpec("SMTP_SENDER_NAME", "Sender display name", GROUP_SMTP, "text", "", "e.g. Posit Connect"),
-    SettingSpec("SMTP_USERNAME", "SMTP username", GROUP_SMTP, "text", "",
-                "Only if your relay needs a login. The password stays in Connect Vars (SMTP_PASSWORD)."),
 
-    SettingSpec("ALLOWED_GIT_HOST", "Git host", GROUP_ADVANCED, "text", "github.com"),
-    SettingSpec("SCAN_INTERVAL_MINUTES", "Scan interval shown in emails (minutes)", GROUP_ADVANCED, "int", "15",
-                "Wording only; the real schedule is set on the job in Connect.", min_value=1, max_value=1440),
     SettingSpec("LOCK_MESSAGE", "Message shown on locked apps (Markdown)", GROUP_ADVANCED, "textarea", "",
                 "Leave empty for the built-in message."),
 )
@@ -125,7 +120,7 @@ def _normalize(spec: SettingSpec, raw) -> tuple[str, str | None]:
                 return "", f"{spec.label}: not valid GitHub organization names: {', '.join(bad)}"
             items = [i.lower() for i in items]
         return ",".join(dict.fromkeys(items)), None
-    if spec.key in ("SMTP_HOST", "ALLOWED_GIT_HOST") and not _HOST_RE.match(value):
+    if spec.key == "SMTP_HOST" and not _HOST_RE.match(value):
         return "", f"{spec.label}: host name only (no https:// or path)"
     if spec.kind == "textarea" and len(value) > 4000:
         return "", f"{spec.label}: at most 4000 characters"
